@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Installman
+Comment=GUI installer for .tar.gz programs
+Exec=/usr/local/bin/installman %f
+Icon=system-software-install
+Terminal=false
+Categories=System;PackageManager;
+MimeType=application/x-gzip;application/x-tar;
