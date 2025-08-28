@@ -24,6 +24,7 @@ struct AppData {
     gchar *archive_path;
     gchar *temp_dir;
     gchar *install_dir;
+    gchar *program_name;
     gboolean is_installing;
     gboolean cancel_requested;
 };
@@ -167,7 +168,8 @@ gboolean execute_shell_command(AppData *data, const gchar *command) {
     gint exit_status = 0;
     GError *error = NULL;
 
-    gboolean result = g_spawn_command_line_sync(command, &output, &errors, &exit_status, &error);
+    gchar *argv[] = {"/bin/sh", "-c", (gchar*)command, NULL};
+    gboolean result = g_spawn_sync(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, &output, &errors, &exit_status, &error);
     
     if (output && strlen(output) > 0) log_message(data, output);
     if (errors && strlen(errors) > 0) log_message(data, errors, TRUE);
@@ -186,6 +188,27 @@ gboolean execute_shell_command(AppData *data, const gchar *command) {
     g_free(output);
     g_free(errors);
     return result;
+}
+
+gchar* get_program_name_from_archive(AppData *data) {
+    GDir *dir = g_dir_open(data->temp_dir, 0, NULL);
+    if (!dir) return NULL;
+
+    const gchar *name;
+    gchar *program_name = NULL;
+
+    while ((name = g_dir_read_name(dir)) != NULL) {
+        gchar *full_path = g_build_filename(data->temp_dir, name, NULL);
+        if (g_file_test(full_path, G_FILE_TEST_IS_DIR) && strcmp(name, ".") != 0 && strcmp(name, "..") != 0) {
+            program_name = g_strdup(name);
+            g_free(full_path);
+            break;
+        }
+        g_free(full_path);
+    }
+
+    g_dir_close(dir);
+    return program_name;
 }
 
 gboolean build_program(AppData *data) {
@@ -275,8 +298,33 @@ gboolean install_program(AppData *data) {
     if (result) {
         log_message(data, "Установка завершена успешно!");
         update_progress(data, 1.0, "Установка завершена");
+        
+        gchar *uninstall_info = g_strdup_printf("Для удаления выполните: sudo installman-uninstall %s", data->program_name);
+        log_message(data, uninstall_info);
+        g_free(uninstall_info);
     }
     return result;
+}
+
+void create_uninstall_script(AppData *data) {
+    gchar *script_path = g_strdup_printf("/usr/local/bin/installman-uninstall-%s", data->program_name);
+    FILE *script_file = fopen(script_path, "w");
+    
+    if (script_file) {
+        fprintf(script_file, "#!/bin/bash\n");
+        fprintf(script_file, "echo \"Удаление %s...\"\n", data->program_name);
+        fprintf(script_file, "sudo rm -rf %s/bin/%s\n", data->install_dir, data->program_name);
+        fprintf(script_file, "sudo rm -rf %s/lib/%s\n", data->install_dir, data->program_name);
+        fprintf(script_file, "sudo rm -rf %s/share/%s\n", data->install_dir, data->program_name);
+        fprintf(script_file, "sudo rm -rf %s/include/%s\n", data->install_dir, data->program_name);
+        fprintf(script_file, "echo \"Удаление завершено\"\n");
+        fclose(script_file);
+        
+        chmod(script_path, 0755);
+        log_message(data, g_strdup_printf("Создан скрипт удаления: %s", script_path));
+    }
+    
+    g_free(script_path);
 }
 
 void cleanup(AppData *data) {
@@ -292,11 +340,21 @@ void installation_thread(AppData *data) {
     data->is_installing = TRUE;
     data->cancel_requested = FALSE;
     
+    data->program_name = get_program_name_from_archive(data);
+    if (!data->program_name) {
+        log_message(data, "Не удалось определить имя программы", TRUE);
+        goto cleanup;
+    }
+    
+    log_message(data, g_strdup_printf("Имя программы: %s", data->program_name));
+    
     if (!extract_archive(data)) goto cleanup;
     if (data->cancel_requested) goto cleanup;
     if (!build_program(data)) goto cleanup;
     if (data->cancel_requested) goto cleanup;
     if (!install_program(data)) goto cleanup;
+    
+    create_uninstall_script(data);
     
 cleanup:
     cleanup(data);
@@ -436,6 +494,7 @@ int main(int argc, char *argv[]) {
     
     if (app_data->temp_dir) g_free(app_data->temp_dir);
     if (app_data->install_dir) g_free(app_data->install_dir);
+    if (app_data->program_name) g_free(app_data->program_name);
     g_free(app_data);
     
     return 0;

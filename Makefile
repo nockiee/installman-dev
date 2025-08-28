@@ -11,7 +11,7 @@ $(TARGET): installman.cpp
 
 install: $(TARGET)
 	install -D -m 755 $(TARGET) $(PREFIX)/bin/$(TARGET)
-	install -D -m 755 uninstaller.sh $(PREFIX)/bin/installman-uninstall
+	install -D -m 755 installman-uninstall $(PREFIX)/bin/installman-uninstall
 	install -D -m 644 installman.desktop /usr/share/applications/installman.desktop
 	update-desktop-database /usr/share/applications/
 
